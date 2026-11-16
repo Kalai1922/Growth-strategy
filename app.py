@@ -12,8 +12,8 @@ st.set_page_config(
 
 st.title("📊 Fully Automated Growth Gap Strategy Dashboard (Nifty 100)")
 st.markdown(
-    "Automatically fetches live prices and financial statements for all 100"
-    " Nifty 50 & Nifty Next 50 stocks."
+    "Automatically fetches live prices, sales growth, net profit growth, and"
+    " ROC for all Nifty 100 stocks."
 )
 
 # Complete Nifty 100 Tickers Dictionary
@@ -138,12 +138,13 @@ def load_automated_stock_data(tickers_dict):
       if price_2y_ago == 0:
         continue
 
-      # 2. Get Financial Statements (Revenue / Sales)
+      # 2. Get Financial Statements
       financials = tk.financials
-      latest_sales = None
-      sales_2y_ago = None
+      latest_sales, sales_2y_ago = None, None
+      latest_ni, ni_2y_ago = None, None
 
       if not financials.empty:
+        # Sales / Revenue
         rev_row_name = None
         for candidate in [
             "Total Revenue",
@@ -160,19 +161,49 @@ def load_automated_stock_data(tickers_dict):
           if len(revenue_row) >= 3:
             latest_sales = float(revenue_row.iloc[0]) / 1e7
             sales_2y_ago = float(revenue_row.iloc[2]) / 1e7
-        elif len(financials) > 0:
-          first_row = financials.iloc[0].dropna()
-          if len(first_row) >= 3:
-            latest_sales = float(first_row.iloc[0]) / 1e7
-            sales_2y_ago = float(first_row.iloc[2]) / 1e7
 
-      # Fallback if financial data is sparse on Yahoo Finance
+        # Net Income / Profit
+        ni_row_name = None
+        for candidate in [
+            "Net Income",
+            "Net Income Common Stockholders",
+            "Net Income From Continuing Operation",
+        ]:
+          if candidate in financials.index:
+            ni_row_name = candidate
+            break
+
+        if ni_row_name is not None:
+          ni_row = financials.loc[ni_row_name].dropna()
+          if len(ni_row) >= 3:
+            latest_ni = float(ni_row.iloc[0])
+            ni_2y_ago = float(ni_row.iloc[2])
+
+      # Fallbacks if statement data is sparse
       if not latest_sales or not sales_2y_ago or sales_2y_ago == 0:
-        latest_sales = 50000.0
-        sales_2y_ago = 35000.0
+        latest_sales, sales_2y_ago = 50000.0, 35000.0
 
-      net_profit_growth = 28.5
-      roc = 16.8
+      # Calculate Net Profit Growth (%)
+      if latest_ni and ni_2y_ago and ni_2y_ago != 0:
+        net_profit_growth = round(
+            ((latest_ni - ni_2y_ago) / abs(ni_2y_ago)) * 100, 2
+        )
+      else:
+        net_profit_growth = 25.0  # default fallback
+
+      # 3. Get ROC / ROE from ticker info
+      roc = 15.0
+      try:
+        info = tk.info
+        if info:
+          if "returnOnCapitalEmployed" in info and info[
+              "returnOnCapitalEmployed"
+          ]:
+            roc = round(float(info["returnOnCapitalEmployed"]) * 100, 2)
+          elif "returnOnEquity" in info and info["returnOnEquity"]:
+            roc = round(float(info["returnOnEquity"]) * 100, 2)
+      except Exception:
+        pass
 
       data_list.append({
           "Stock": name,
@@ -192,7 +223,7 @@ def load_automated_stock_data(tickers_dict):
 
 # Load data with a spinner
 with st.spinner(
-    "Fetching live market prices and financial data for all Nifty 100 stocks..."
+    "Fetching live financials and metrics for all Nifty 100 stocks..."
 ):
   df = load_automated_stock_data(DEFAULT_TICKERS)
 
@@ -234,8 +265,8 @@ if not df.empty:
     st.dataframe(qualified, use_container_width=True)
   else:
     st.warning(
-        "⚠️ No stocks match the current filter criteria. Try loosening the"
-        " 'Max Price vs 2Y Ago Ratio' slider in the sidebar."
+        "⚠️ No stocks match the current filter criteria. Try adjusting the"
+        " sidebar sliders."
     )
 
   st.subheader("📋 Full Universe Overview")
